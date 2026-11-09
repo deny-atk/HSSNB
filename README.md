@@ -74,6 +74,56 @@ options.
 requested accelerator is not available, training runs on the CPU. GPU runs can
 differ slightly from one repeat to the next.
 
+### Spatially disjoint split
+
+The default random split (`--split random`) draws training and test pixels from
+the same fields. Each sample is a 25 × 25 window, so a test pixel's window
+almost always contains pixels that are themselves training samples, often its
+direct neighbours. The test score then mostly measures how well the model
+recognises a place it has already seen, and comes out near 100%.
+
+`--split spatial` keeps test windows free of training pixels:
+
+```bash
+python train.py --dataset IP --split spatial \
+  --data_path data/ip/Indian_pines_corrected.mat --gt_path data/ip/Indian_pines_gt.mat
+```
+
+1. The scene is cut into a grid of `--block_size` squares (default
+   `--window_size`), and each block goes whole to training, validation or test.
+   Blocks are visited in a seeded random order, and each goes to the split
+   whose share of the block's classes is furthest below its target
+   (`--train_size`, `--val_size`, the rest for test).
+2. A class left with no training pixel gets the block that holds most of it
+   moved into training.
+3. A guard band is cleared: validation pixels within `window_size // 2` pixels
+   (counted along rows and columns, diagonals included) of a training pixel are
+   dropped, then test pixels within that distance of a training or validation
+   pixel. Training keeps all its pixels.
+
+For example, with 25 × 25 windows the guard is 12 pixels. A test pixel 12
+pixels to the right of a training pixel is dropped, because its window reaches
+that training pixel; one 13 pixels away is kept. The two windows still share
+some unlabelled context pixels, but no window is centred on a pixel of another
+split.
+
+The guard costs samples, and the split fractions are targets, not exact:
+blocks are whole, and the guard drops validation and test pixels at every
+boundary with training. Classes that occupy a single small area may end up
+only in training. `train.py` prints the classes missing from each split and
+stops with an error if a split is empty; a smaller `--block_size` gives more,
+smaller blocks to spread over the splits, at the cost of more boundary lost to
+the guard. Expect clearly lower test accuracy than with the random split; that
+gap is the leakage the random split hides.
+
+The choice and the block size are stored in the checkpoint, so `evaluate.py`
+rebuilds the same split. Checkpoints saved before this option existed use the
+random split. The block and guard-band approach follows the disjoint sampling
+of Ahmad et al.,
+[Importance of Disjoint Sampling in Conventional and Transformer Models for Hyperspectral Image Classification](https://arxiv.org/abs/2404.14944)
+(2024), and the "leakage-free" block-and-buffer protocols, for example
+El-Hajri et al., [Adaptive Band Selection for Hyperspectral Classification with Spatially Disjoint Evaluation](https://arxiv.org/abs/2606.06684).
+
 ## Evaluate
 
 ```bash
@@ -144,6 +194,7 @@ The paper's abstract reports overall accuracies of 99.83% (IP), 99.98% (PU)
 and 100% (SA). With a random pixel split, most test pixels lie next to training
 pixels and their windows overlap, so these figures, the paper's and ours,
 overstate how well the model does on areas it has not seen.
+[`--split spatial`](#spatially-disjoint-split) removes that overlap.
 
 ## Tests
 

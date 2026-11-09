@@ -5,6 +5,7 @@ from pathlib import Path
 import numpy as np
 import torch
 from scipy.io import loadmat
+from scipy.ndimage import maximum_filter
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from torch.utils.data import Dataset
@@ -45,17 +46,24 @@ def drop_water_bands(data, dataset_name):
     return np.delete(data, bands, axis=-1)
 
 
+SPLITS = ("random", "spatial")
+
+
+def check_split_sizes(train_size, val_size):
+    if not (0 < train_size and 0 <= val_size and train_size + val_size < 1):
+        raise ValueError(
+            f"Need 0 < train_size, 0 <= val_size and train_size + val_size < 1; "
+            f"got {train_size} and {val_size}"
+        )
+
+
 def stratified_split(labels, train_size, val_size, seed):
     """Split sample indices class by class into train, validation and test.
 
     Each class gives int(n * train_size) samples to training and int(n * val_size)
     to validation; the rest go to test.
     """
-    if not (0 < train_size and 0 <= val_size and train_size + val_size < 1):
-        raise ValueError(
-            f"Need 0 < train_size, 0 <= val_size and train_size + val_size < 1; "
-            f"got {train_size} and {val_size}"
-        )
+    check_split_sizes(train_size, val_size)
     rng = np.random.default_rng(seed)
     parts = ([], [], [])
     for c in np.unique(labels):
@@ -65,6 +73,58 @@ def stratified_split(labels, train_size, val_size, seed):
         parts[1].append(idx[n_train:n_train + n_val])
         parts[2].append(idx[n_train + n_val:])
     return tuple(np.sort(np.concatenate(p)) for p in parts)
+
+
+def spatial_split(gt, window_size, train_size, val_size, seed, block_size=None):
+    """Split the labelled pixels of gt into spatially separated train, validation and test.
+
+    Returns index arrays into the labelled pixels in np.nonzero(gt) order. The scene
+    is cut into block_size squares (default window_size), and whole blocks go to one
+    split, so that each split's share of every class stays close to train_size,
+    val_size and the rest. A class that ends up with no training pixel gets the
+    block holding most of it moved into training. Then validation pixels within
+    window_size // 2 (Chebyshev distance) of a training pixel are dropped, and test
+    pixels within that distance of a training or validation pixel, so no test
+    window contains the centre of a pixel used for training or model selection.
+
+    Block assignment with a buffer at the boundaries follows the disjoint and
+    "leakage-free" protocols in Ahmad et al. 2024 (arXiv 2404.14944) and arXiv
+    2606.06684; the greedy class balancing follows scikit-learn's StratifiedGroupKFold.
+    """
+    check_split_sizes(train_size, val_size)
+    block = block_size or window_size
+    rows, cols = np.nonzero(gt)
+    classes, label_idx = np.unique(gt[rows, cols], return_inverse=True)
+    blocks, block_idx = np.unique((rows // block) * gt.shape[1] + cols // block, return_inverse=True)
+    counts = np.zeros((len(blocks), len(classes)))
+    np.add.at(counts, (block_idx, label_idx), 1)
+
+    targets = np.array([train_size, val_size, 1 - train_size - val_size])[:, None]
+    assigned = np.zeros((3, len(classes)))
+    owner = np.empty(len(blocks), dtype=int)
+    for b in np.random.default_rng(seed).permutation(len(blocks)):
+        # How far each split's share of the block's classes lies below its target.
+        need = (targets - assigned / counts.sum(axis=0)) @ counts[b]
+        need[targets[:, 0] == 0] = -np.inf  # never give blocks to an empty validation split
+        owner[b] = np.argmax(need)
+        assigned[owner[b]] += counts[b]
+    for c in np.flatnonzero(assigned[0] == 0):
+        b = np.argmax(counts[:, c])
+        assigned[owner[b]] -= counts[b]
+        owner[b] = 0
+        assigned[0] += counts[b]
+
+    part = owner[block_idx]
+    size = 2 * (window_size // 2) + 1
+
+    def near(mask):
+        grid = np.zeros(gt.shape, dtype=np.uint8)
+        grid[rows[mask], cols[mask]] = 1
+        return maximum_filter(grid, size=size, mode="constant")[rows, cols].astype(bool)
+
+    part[(part == 1) & near(part == 0)] = -1
+    part[(part == 2) & near((part == 0) | (part == 1))] = -1
+    return tuple(np.flatnonzero(part == k) for k in range(3))
 
 
 class PatchDataset(Dataset):
@@ -121,8 +181,16 @@ class HSIPreprocessor:
         self.data_pca = reduced.reshape(h, w, self.n_components).astype(np.float32)
         return self.data_pca
 
-    def preprocess_pipeline(self, train_size=0.3, val_size=0.1, seed=42):
-        """Run PCA and return train, validation and test PatchDatasets."""
+    def preprocess_pipeline(self, train_size=0.3, val_size=0.1, seed=42, split="random",
+                            block_size=None):
+        """Run PCA and return train, validation and test PatchDatasets.
+
+        split is "random" (stratified_split) or "spatial" (spatial_split).
+        "missing_classes" lists, per split, the 1-based classes of the scene it has no
+        sample of.
+        """
+        if split not in SPLITS:
+            raise ValueError(f"Unknown split {split!r}. Use one of {SPLITS}")
         self.apply_pca()
         pad = self.window_size // 2
         padded = np.pad(self.data_pca, ((pad, pad), (pad, pad), (0, 0)), mode="reflect")
@@ -132,10 +200,18 @@ class HSIPreprocessor:
         coords = torch.from_numpy(np.stack([rows, cols], axis=1)).long()
         labels = torch.from_numpy(self.gt[rows, cols].astype(np.int64) - 1)
 
-        parts = stratified_split(labels.numpy(), train_size, val_size, seed)
-        split = {
+        if split == "spatial":
+            parts = spatial_split(self.gt, self.window_size, train_size, val_size, seed, block_size)
+        else:
+            parts = stratified_split(labels.numpy(), train_size, val_size, seed)
+        names = ("train", "val", "test")
+        result = {
             name: PatchDataset(cube, coords[idx], labels[idx], self.window_size)
-            for name, idx in zip(("train", "val", "test"), parts)
+            for name, idx in zip(names, parts)
         }
-        split["num_classes"] = int(self.gt.max())
-        return split
+        present = set(np.unique(self.gt[rows, cols]).tolist())
+        result["missing_classes"] = {
+            name: sorted(present - set((labels[idx] + 1).tolist())) for name, idx in zip(names, parts)
+        }
+        result["num_classes"] = int(self.gt.max())
+        return result

@@ -11,7 +11,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 
 from hssnb.models import HSSNB
-from hssnb.preprocessor import DATASETS, HSIPreprocessor
+from hssnb.preprocessor import DATASETS, SPLITS, HSIPreprocessor
 from hssnb.training import evaluate, resolve_device, seed_everything, train_one_epoch
 
 
@@ -27,6 +27,11 @@ def parse_args(argv=None):
     parser.add_argument('--train_size', type=float, default=0.3, help='Training data proportion')
     parser.add_argument('--val_size', type=float, default=0.1,
                         help='Validation data proportion, used to pick the best epoch')
+    parser.add_argument('--split', type=str, default='random', choices=SPLITS,
+                        help='random: pixels drawn per class; spatial: whole blocks per split, '
+                             'with a window_size//2 guard band so test windows hold no training pixel')
+    parser.add_argument('--block_size', type=int, default=None,
+                        help='Block side in pixels for --split spatial (default: --window_size)')
     parser.add_argument('--seed', type=int, default=42, help='Seed for the split and training')
     parser.add_argument('--batch_size', type=int, default=64, help='Batch size')
     parser.add_argument('--num_epochs', type=int, default=100, help='Number of training epochs')
@@ -39,6 +44,8 @@ def parse_args(argv=None):
     args = parser.parse_args(argv)
     if args.num_epochs < 1:
         parser.error('--num_epochs must be at least 1')
+    if args.block_size is not None and args.block_size < 1:
+        parser.error('--block_size must be at least 1')
     return args
 
 
@@ -56,13 +63,17 @@ def main(argv=None):
         remove_water_bands=args.remove_water_bands
     )
     split = preprocessor.preprocess_pipeline(
-        train_size=args.train_size, val_size=args.val_size, seed=args.seed)
+        train_size=args.train_size, val_size=args.val_size, seed=args.seed,
+        split=args.split, block_size=args.block_size)
     num_classes = split['num_classes']
-    if len(split['train']) == 0 or len(split['val']) == 0:
-        raise ValueError(f"Empty split: train {len(split['train'])}, validation {len(split['val'])} "
-                         f"samples. Raise --train_size or --val_size.")
-    print(f"Samples: train {len(split['train'])}, validation {len(split['val'])}, "
-          f"test {len(split['test'])}")
+    sizes = f"train {len(split['train'])}, validation {len(split['val'])}, test {len(split['test'])}"
+    if not all(len(split[name]) for name in ('train', 'val', 'test')):
+        hint = ' or lower --block_size' if args.split == 'spatial' else ''
+        raise ValueError(f"Empty split: {sizes} samples. Change --train_size or --val_size{hint}.")
+    print(f"Samples: {sizes}")
+    for name, label in (('train', 'training'), ('val', 'validation'), ('test', 'test')):
+        if split['missing_classes'][name]:
+            print(f"Classes with no {label} samples: {split['missing_classes'][name]}")
 
     train_loader, val_loader, test_loader = (
         DataLoader(split[name], batch_size=args.batch_size, shuffle=(name == 'train'),
@@ -80,7 +91,7 @@ def main(argv=None):
         'dataset': args.dataset, 'n_components': args.n_components,
         'window_size': args.window_size, 'remove_water_bands': args.remove_water_bands,
         'train_size': args.train_size, 'val_size': args.val_size, 'seed': args.seed,
-        'num_classes': num_classes,
+        'split': args.split, 'block_size': args.block_size, 'num_classes': num_classes,
     }
     os.makedirs(args.save_dir, exist_ok=True)
     checkpoint_path = os.path.join(args.save_dir, f"best_model_{args.dataset}.pth")
