@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader
 
 from hssnb.models import HSSNB
 from hssnb.preprocessor import DATASETS, HSIPreprocessor
-from hssnb.training import evaluate
+from hssnb.training import evaluate, resolve_device
 
 matplotlib.use('Agg')  # only writes image files
 import matplotlib.pyplot as plt  # noqa: E402
@@ -107,9 +107,9 @@ def main(argv=None):
                         help='Path to the ground truth .mat file used for training.')
     parser.add_argument('--batch_size', type=int, default=256, help='Batch size for inference.')
     parser.add_argument('--device', type=str, default='cuda',
-                        help='Device to use for evaluation ("cpu" or "cuda").')
+                        help='Device to use for evaluation ("cpu", "cuda" or "mps"); falls back to the CPU.')
     args = parser.parse_args(argv)
-    device = torch.device(args.device if torch.cuda.is_available() else 'cpu')
+    device = resolve_device(args.device)
 
     checkpoint_path = os.path.join(args.checkpoints_dir, f"best_model_{args.dataset}.pth")
     metrics_path = os.path.join(args.checkpoints_dir, f"metrics_{args.dataset}.npz")
