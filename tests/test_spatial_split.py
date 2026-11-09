@@ -10,7 +10,13 @@ from scipy.io import loadmat, savemat
 
 import evaluate as evaluate_script
 import train
-from hssnb.preprocessor import HSIPreprocessor, spatial_split
+from hssnb import preprocessor
+from hssnb.preprocessor import HSIPreprocessor
+
+
+def spatial_split(*args, **kwargs):
+    # Looked up on call, so this file still loads where spatial_split does not exist.
+    return preprocessor.spatial_split(*args, **kwargs)
 
 FAST = ["--n_components", "13", "--window_size", "11", "--batch_size", "64", "--device", "cpu"]
 
