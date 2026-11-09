@@ -196,6 +196,91 @@ pixels and their windows overlap, so these figures, the paper's and ours,
 overstate how well the model does on areas it has not seen.
 [`--split spatial`](#spatially-disjoint-split) removes that overlap.
 
+### What the results look like
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/results_map_dark.png">
+  <img src="docs/images/results_map_light.png" width="100%" alt="Three maps of the Indian Pines scene. Left: the scene in one near-infrared band. Middle: the labelled pixels coloured by split; training (3,067) and validation (1,018) pixels are scattered evenly among the test pixels (6,164), and the 25 by 25 window around a typical test pixel holds 123 training pixels. Right: the 33 wrongly classified test pixels, marked in red; 32 of them lie at field edges.">
+</picture>
+
+The middle map shows why random-split scores run so high: training pixels are
+scattered through every field, so the window the model reads around a test
+pixel is largely made of pixels it was trained on. Of the 33 errors on the
+right, 32 lie on the edge of a field (next to a pixel of another class or an
+unlabelled one), where only 27% of all test pixels lie.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/per_class_dark.png">
+  <img src="docs/images/per_class_light.png" width="100%" alt="Dot plot of test accuracy for each class in Indian Pines, Pavia University and Salinas. Almost every class is between 98% and 100%. The lowest are two small Indian Pines classes: grass-pasture-mowed at 88.9% of 18 test pixels and alfalfa at 93.1% of 29.">
+</picture>
+
+Nearly every class is above 98%. The lowest scores belong to the smallest
+classes, where one or two wrong pixels move the accuracy by several points.
+
+<details>
+<summary>Per-class test accuracy as a table</summary>
+
+**Indian Pines** (overall 99.46%)
+
+| Class | Test pixels | Accuracy |
+| --- | ---: | ---: |
+| Alfalfa | 29 | 93.10% |
+| Corn, no till | 858 | 99.53% |
+| Corn, minimum till | 498 | 99.60% |
+| Corn | 143 | 100.00% |
+| Grass, pasture | 291 | 99.66% |
+| Grass, trees | 438 | 98.40% |
+| Grass, pasture mowed | 18 | 88.89% |
+| Hay, windrowed | 288 | 100.00% |
+| Oats | 12 | 100.00% |
+| Soybean, no till | 584 | 98.46% |
+| Soybean, minimum till | 1,474 | 99.93% |
+| Soybean, clean | 357 | 99.16% |
+| Wheat | 124 | 100.00% |
+| Woods | 760 | 100.00% |
+| Buildings, grass, trees, drives | 233 | 100.00% |
+| Stone and steel towers | 57 | 96.49% |
+
+**Pavia University** (overall 99.89%)
+
+| Class | Test pixels | Accuracy |
+| --- | ---: | ---: |
+| Asphalt | 3,979 | 99.90% |
+| Meadows | 11,191 | 100.00% |
+| Gravel | 1,261 | 100.00% |
+| Trees | 1,839 | 99.18% |
+| Painted metal sheets | 808 | 100.00% |
+| Bare soil | 3,019 | 100.00% |
+| Bitumen | 798 | 100.00% |
+| Self-blocking bricks | 2,210 | 100.00% |
+| Shadows | 569 | 98.42% |
+
+**Salinas** (overall 99.97%)
+
+| Class | Test pixels | Accuracy |
+| --- | ---: | ---: |
+| Broccoli green weeds 1 | 1,207 | 100.00% |
+| Broccoli green weeds 2 | 2,237 | 100.00% |
+| Fallow | 1,187 | 100.00% |
+| Fallow, rough plough | 837 | 99.88% |
+| Fallow, smooth | 1,608 | 99.81% |
+| Stubble | 2,377 | 100.00% |
+| Celery | 2,149 | 100.00% |
+| Grapes, untrained | 6,763 | 100.00% |
+| Vineyard soil, developing | 3,723 | 100.00% |
+| Corn, senesced, green weeds | 1,968 | 100.00% |
+| Lettuce romaine, 4 weeks | 642 | 100.00% |
+| Lettuce romaine, 5 weeks | 1,157 | 100.00% |
+| Lettuce romaine, 6 weeks | 551 | 99.09% |
+| Lettuce romaine, 7 weeks | 642 | 99.84% |
+| Vineyard, untrained | 4,362 | 99.98% |
+| Vineyard, vertical trellis | 1,085 | 100.00% |
+
+</details>
+
+The figures are drawn by `python scripts/make_figures.py --device mps` from the
+trained checkpoints in `checkpoints/` and the data in `data/`.
+
 ## Tests
 
 ```bash
