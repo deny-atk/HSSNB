@@ -22,18 +22,50 @@ def test_dw7_requested_device_or_cpu_fallback(monkeypatch, name, cuda, mps, expe
 
     monkeypatch.setattr(torch.cuda, "is_available", lambda: cuda)
     monkeypatch.setattr(torch.backends.mps, "is_available", lambda: mps)
-    assert resolve_device(name).type == expected
+    assert resolve_device(name) == torch.device(expected)
 
 
-@pytest.mark.parametrize("script", [train, evaluate_script], ids=["train", "evaluate"])
-def test_dw7_scripts_pass_the_device_flag_through(monkeypatch, script):
-    requested = []
+# cpu:0 stands in for an accelerator: it differs from the plain "cpu" the scripts used
+# to fall back to, and it runs anywhere.
+MARKED = torch.device("cpu", 0)
+FAST = ["--n_components", "13", "--window_size", "11", "--batch_size", "32"]
 
-    def spy(name):
+
+def _record_device_then_stop(seen, position):
+    def spy(*args):
+        seen.append(args[position])  # the device argument
+        raise SystemExit
+    return spy
+
+
+def _resolver(requested):
+    def resolve(name):
         requested.append(name)
-        raise SystemExit  # stop before any data is read
+        return MARKED
+    return resolve
 
-    monkeypatch.setattr(script, "resolve_device", spy)
+
+def test_dw7_train_uses_the_resolved_device(monkeypatch, make_scene, tmp_path):
+    data_path, gt_path = make_scene("IP", size=16, num_classes=3)
+    requested, seen = [], []
+    monkeypatch.setattr(train, "resolve_device", _resolver(requested))
+    monkeypatch.setattr(train, "train_one_epoch", _record_device_then_stop(seen, 4))
     with pytest.raises(SystemExit):
-        script.main(["--dataset", "IP", "--data_path", "x.mat", "--gt_path", "y.mat", "--device", "mps"])
+        train.main(["--dataset", "IP", "--data_path", str(data_path), "--gt_path", str(gt_path),
+                    "--num_epochs", "1", "--save_dir", str(tmp_path), "--device", "mps", *FAST])
     assert requested == ["mps"]
+    assert seen == [MARKED]
+
+
+def test_dw7_evaluate_uses_the_resolved_device(monkeypatch, make_scene, tmp_path):
+    data_path, gt_path = make_scene("IP", size=16, num_classes=3)
+    train.main(["--dataset", "IP", "--data_path", str(data_path), "--gt_path", str(gt_path),
+                "--num_epochs", "1", "--save_dir", str(tmp_path), "--device", "cpu", *FAST])
+    requested, seen = [], []
+    monkeypatch.setattr(evaluate_script, "resolve_device", _resolver(requested))
+    monkeypatch.setattr(evaluate_script, "evaluate", _record_device_then_stop(seen, 3))
+    with pytest.raises(SystemExit):
+        evaluate_script.main(["--dataset", "IP", "--checkpoints_dir", str(tmp_path),
+                              "--data_path", str(data_path), "--gt_path", str(gt_path), "--device", "mps"])
+    assert requested == ["mps"]
+    assert seen == [MARKED]
