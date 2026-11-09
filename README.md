@@ -152,3 +152,10 @@ your own copy of the data.
   archivePrefix = {arXiv}
 }
 ```
+
+## License
+
+The code is released under the [MIT License](LICENSE). It is an independent
+implementation of the method published by Sahoo and Chakraborty; if you use it,
+please cite their paper (above). The license covers this code only, not the
+paper or the datasets, which come with their own terms.
