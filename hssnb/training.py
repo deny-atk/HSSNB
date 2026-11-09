@@ -14,6 +14,15 @@ def seed_everything(seed: int) -> None:
     torch.manual_seed(seed)
 
 
+def resolve_device(name: str) -> torch.device:
+    """Return the device named by name ("cpu", "cuda", "cuda:1", "mps"), or the CPU if it is not available."""
+    device = torch.device(name)
+    available = {"cuda": torch.cuda.is_available, "mps": torch.backends.mps.is_available}
+    if device.type in available and not available[device.type]():
+        return torch.device("cpu")
+    return device
+
+
 def compute_metrics(y_true: np.ndarray, y_pred: np.ndarray, num_classes: int) -> dict:
     """Overall accuracy (OA), average per-class accuracy (AA), Cohen's kappa and the confusion matrix.
 

@@ -12,7 +12,7 @@ from torch.utils.data import DataLoader
 
 from hssnb.models import HSSNB
 from hssnb.preprocessor import DATASETS, HSIPreprocessor
-from hssnb.training import evaluate, seed_everything, train_one_epoch
+from hssnb.training import evaluate, resolve_device, seed_everything, train_one_epoch
 
 
 def parse_args(argv=None):
@@ -34,7 +34,8 @@ def parse_args(argv=None):
     parser.add_argument('--num_workers', type=int, default=0, help='DataLoader worker processes')
     parser.add_argument('--save_dir', type=str, default='checkpoints',
                         help='Directory to save model checkpoints')
-    parser.add_argument('--device', type=str, default='cuda', help='Device to use for training')
+    parser.add_argument('--device', type=str, default='cuda',
+                        help='Device to use for training ("cpu", "cuda" or "mps"); falls back to the CPU')
     args = parser.parse_args(argv)
     if args.num_epochs < 1:
         parser.error('--num_epochs must be at least 1')
@@ -44,7 +45,7 @@ def parse_args(argv=None):
 def main(argv=None):
     args = parse_args(argv)
     seed_everything(args.seed)
-    device = torch.device(args.device if torch.cuda.is_available() else 'cpu')
+    device = resolve_device(args.device)
 
     preprocessor = HSIPreprocessor(
         data_path=args.data_path,
