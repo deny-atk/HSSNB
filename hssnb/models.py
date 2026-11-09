@@ -1,11 +1,10 @@
 import torch
 import torch.nn as nn
-import numpy as np
-from typing import Tuple
+
 
 class CNN3DBlock(nn.Module):
     """3D CNN block with ReLU activation"""
-    def __init__(self, in_channels: int, out_channels: int, kernel_size: Tuple[int, int, int]):
+    def __init__(self, in_channels: int, out_channels: int, kernel_size: tuple[int, int, int]):
         super().__init__()
         # If you want to keep the exact shape progression from Table 1, note that
         # kernel_size=(7,3,3) in PyTorch means a 7-band "depth" kernel,
@@ -46,9 +45,13 @@ class HSSNB(nn.Module):
     "Hybrid CNN Bi-LSTM neural network for Hyperspectral image classification"
     Alok Ranjan Sahoo and Pavan Chakraborty
     """
-    def __init__(self, num_classes: int = 16):
+    def __init__(self, num_classes: int = 16, n_components: int = 30):
         super().__init__()
-        
+        # The three 3D kernels shrink the spectral axis by 6 + 4 + 2 bands.
+        spectral_out = n_components - 12
+        if spectral_out < 1:
+            raise ValueError(f"n_components must be at least 13, got {n_components}")
+
         # 3D CNN path 
         # (paper says kernel sizes: 3x3x7, 3x3x5, 3x3x3, but in code we keep
         #  (7,3,3), (5,3,3), (3,3,3) to match PyTorch ordering of (D,H,W))
@@ -58,7 +61,7 @@ class HSSNB(nn.Module):
         
         # 2D CNN path
         # After the 3D CNN, we flatten [channel x spectral] -> new "channel"
-        self.conv2d_1 = CNN2DBlock(576, 64)   # 32 * 18 == 576
+        self.conv2d_1 = CNN2DBlock(32 * spectral_out, 64)   # 32 * 18 == 576 by default
         self.conv2d_2 = CNN2DBlock(64, 128)
         
         # Optional: A layer norm before Bi-LSTM can help stabilize training
@@ -86,10 +89,10 @@ class HSSNB(nn.Module):
         """
         Forward pass of the model
         
-        Input shape: (batch_size, 1, 30, 25, 25)
-          - 1 is input channel
-          - 30 is spectral dimension
-          - 25 x 25 is spatial
+        Input shape: (batch_size, 1, n_components, window, window), by default
+        (batch_size, 1, 30, 25, 25). The shape comments below are for that default.
+        The window must be at least 11 pixels, since the five convolutions each
+        trim 2 pixels from the spatial size.
         """
         batch_size = x.size(0)
         
@@ -106,8 +109,7 @@ class HSSNB(nn.Module):
         x = self.conv2d_2(x)  # -> (batch, 128, 15, 15)
         
         # Reshape for Bi-LSTM: each spatial location is a time step => 15*15=225
-        x = x.permute(0, 2, 3, 1)         # -> (batch, 15, 15, 128)
-        x = x.reshape(batch_size, 225, 128)  # -> (batch, 225, 128)
+        x = x.flatten(2).transpose(1, 2)  # -> (batch, 225, 128)
         
         x = self.layer_norm(x)
         
