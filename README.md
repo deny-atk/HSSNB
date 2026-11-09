@@ -70,6 +70,10 @@ metrics, go to `checkpoints/metrics_<dataset>.npz`.
 order, so a CPU run repeats exactly. Run `python train.py --help` for all
 options.
 
+`--device` selects `cuda` (the default), `mps` (Apple GPU) or `cpu`; if the
+requested accelerator is not available, training runs on the CPU. GPU runs can
+differ slightly from one repeat to the next.
+
 ### Spatially disjoint split
 
 The default random split (`--split random`) draws training and test pixels from
@@ -170,9 +174,27 @@ comparing numbers.
 
 ## Results
 
-No results from this code on the real datasets have been published here yet.
+Test-split results of this code, from single runs on 9 November 2026 on an
+Apple M5 Pro GPU (`--device mps`) at the default settings: corrected scenes, 30
+PCA components, 25×25 windows, random 30/10/60 split, seed 42, batch size 64,
+Adam with learning rate 0.001, up to 100 epochs.
+
+| Scene | Test pixels | Best epoch | OA | AA | Kappa | Training time |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Indian Pines | 6,164 | 45 | 99.46% | 98.33% | 0.9939 | 24 min |
+| Pavia University | 25,674 | 63 | 99.89% | 99.72% | 0.9986 | 1 h 43 min |
+| Salinas | 32,495 | 10 | 99.97% | 99.91% | 0.9996 | 15 min (11 epochs) |
+
+The Salinas run was stopped after 11 of its 100 epochs. Epoch 10 had reached
+100% validation accuracy, and the checkpoint is replaced only by a strictly
+better one, so later epochs could not change it. Its test split was then scored
+with that checkpoint, as `train.py` does at the end of a run.
+
 The paper's abstract reports overall accuracies of 99.83% (IP), 99.98% (PU)
-and 100% (SA).
+and 100% (SA). With a random pixel split, most test pixels lie next to training
+pixels and their windows overlap, so these figures, the paper's and ours,
+overstate how well the model does on areas it has not seen.
+[`--split spatial`](#spatially-disjoint-split) removes that overlap.
 
 ## Tests
 
@@ -202,3 +224,10 @@ your own copy of the data.
   archivePrefix = {arXiv}
 }
 ```
+
+## License
+
+The code is released under the [MIT License](LICENSE). It is an independent
+implementation of the method published by Sahoo and Chakraborty; if you use it,
+please cite their paper (above). The license covers this code only, not the
+paper or the datasets, which come with their own terms.
