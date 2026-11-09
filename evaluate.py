@@ -134,8 +134,10 @@ def main(argv=None):
         window_size=config['window_size'],
         remove_water_bands=config['remove_water_bands'],
     )
+    # Checkpoints from before --split existed used the random split.
     split = preprocessor.preprocess_pipeline(
-        train_size=config['train_size'], val_size=config['val_size'], seed=config['seed'])
+        train_size=config['train_size'], val_size=config['val_size'], seed=config['seed'],
+        split=config.get('split', 'random'), block_size=config.get('block_size'))
     test_loader = DataLoader(split['test'], batch_size=args.batch_size)
 
     num_classes = config['num_classes']
